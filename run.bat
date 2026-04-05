@@ -1,64 +1,81 @@
 @echo off
-REM ─────────────────────────────────────────────────────────────
-REM Gaming Leaderboard Flask App Launcher
-REM ─────────────────────────────────────────────────────────────
+setlocal enabledelayedexpansion
+
+REM ═════════════════════════════════════════════════════════════
+REM Gaming Leaderboard - Flask App Launcher & Setup
+REM ═════════════════════════════════════════════════════════════
 
 chcp 65001 >nul
 cls
+
 echo.
 echo ╔═══════════════════════════════════════════════════════════╗
-echo ║     Gaming Leaderboard - Application Launcher             ║
+echo ║   Gaming Leaderboard - Flask Application                  ║
 echo ╚═══════════════════════════════════════════════════════════╝
 echo.
 
 REM ─────────────────────────────────────────────────────────────
 REM Check if Python is installed
 REM ─────────────────────────────────────────────────────────────
+echo [•] Checking Python installation...
 python --version >nul 2>&1
-if errorlevel 1 (
-    echo [ERROR] Python is not installed or not in PATH
-    echo Please install Python from https://www.python.org
+if !errorlevel! neq 0 (
+    echo.
+    echo [ERROR] Python not found in PATH
+    echo Please install Python: https://www.python.org
+    echo.
     pause
     exit /b 1
 )
-
-echo [✓] Python found: 
-python --version
+for /f "tokens=*" %%i in ('python --version') do set PYTHON_VER=%%i
+echo [✓] !PYTHON_VER!
 echo.
 
 REM ─────────────────────────────────────────────────────────────
-REM Create virtual environment if it doesn't exist
+REM Create/Check virtual environment
 REM ─────────────────────────────────────────────────────────────
+echo [•] Checking virtual environment...
 if not exist "venv" (
-    echo [•] Creating virtual environment...
+    echo    Creating venv. This may take a moment...
     python -m venv venv
-    if errorlevel 1 (
-        echo [ERROR] Failed to create virtual environment
+    if !errorlevel! neq 0 (
+        echo.
+        echo [ERROR] Failed to create venv
+        echo.
         pause
         exit /b 1
     )
     echo [✓] Virtual environment created
 ) else (
-    echo [✓] Virtual environment already exists
+    echo [✓] Virtual environment exists
 )
 echo.
 
 REM ─────────────────────────────────────────────────────────────
-REM Activate virtual environment and install requirements
+REM Activate virtual environment
 REM ─────────────────────────────────────────────────────────────
+echo [•] Activating virtual environment...
 call venv\Scripts\activate.bat
-if errorlevel 1 (
-    echo [ERROR] Failed to activate virtual environment
+if !errorlevel! neq 0 (
+    echo.
+    echo [ERROR] Failed to activate venv
+    echo.
     pause
     exit /b 1
 )
-echo [✓] Virtual environment activated
+echo [✓] Activated
 echo.
 
+REM ─────────────────────────────────────────────────────────────
+REM Install dependencies
+REM ─────────────────────────────────────────────────────────────
 echo [•] Installing dependencies from requirements.txt...
 pip install -q -r requirements.txt
-if errorlevel 1 (
+if !errorlevel! neq 0 (
+    echo.
     echo [ERROR] Failed to install dependencies
+    echo Try: pip install -r requirements.txt
+    echo.
     pause
     exit /b 1
 )
@@ -66,40 +83,89 @@ echo [✓] Dependencies installed
 echo.
 
 REM ─────────────────────────────────────────────────────────────
-REM Database Setup Check
+REM Create .env if missing
 REM ─────────────────────────────────────────────────────────────
-echo [•] Database Configuration Check
-echo    - Make sure your MySQL server is running
-echo    - Default connection: localhost, user: root, database: gaming_leaderboard
+if not exist ".env" (
+    echo [•] Creating .env file...
+    if exist ".env.example" (
+        copy .env.example .env >nul
+        echo [✓] .env created
+    ) else (
+        echo [ERROR] .env.example not found
+        echo.
+        pause
+        exit /b 1
+    )
+)
 echo.
 
-REM Optional: You can uncomment the line below to auto-populate the database
-REM echo [•] Populating database with sample data...
-REM python populate_db.py
+REM ─────────────────────────────────────────────────────────────
+REM Setup database if first run
+REM ─────────────────────────────────────────────────────────────
+if not exist "setup_done.txt" (
+    echo [!] First run - Database setup needed
+    echo.
+    set /p PROCEED="Continue with database setup? (y/n): "
+    
+    if /i "!PROCEED!"=="y" (
+        echo.
+        echo [•] Reading .env credentials...
+        
+        REM Parse .env for DB_PASSWORD
+        for /f "tokens=2 delims==" %%A in ('findstr /R "^DB_PASSWORD" .env') do set DB_PASS=%%A
+        
+        if "!DB_PASS!"=="" (
+            echo [ERROR] Could not read DB_PASSWORD from .env
+            echo.
+            pause
+            exit /b 1
+        )
+        
+        echo [•] Creating database 'gaming_leaderboard'...
+        set PGPASSWORD=!DB_PASS!
+        psql -U postgres -h localhost -c "CREATE DATABASE gaming_leaderboard;" 2>nul
+        if !errorlevel! equ 0 (
+            echo [✓] Database created
+        ) else (
+            echo [!] Database may already exist (checking...)
+        )
+        echo.
+        
+        echo [•] Initializing tables and seed data...
+        psql -U postgres -h localhost -d gaming_leaderboard -f schema.sql >nul 2>&1
+        if !errorlevel! equ 0 (
+            echo [✓] Tables initialized
+            echo. > setup_done.txt
+        ) else (
+            echo [ERROR] Schema initialization failed
+            echo Try manually: psql -U postgres -d gaming_leaderboard -f schema.sql
+            echo.
+            pause
+            exit /b 1
+        )
+    )
+    echo.
+)
 
 REM ─────────────────────────────────────────────────────────────
-REM Start the Flask application
+REM Start Flask
 REM ─────────────────────────────────────────────────────────────
-echo [•] Starting Flask development server...
-echo.
 echo ╔═══════════════════════════════════════════════════════════╗
-echo ║  Server starting on http://127.0.0.1:5000                 ║
-echo ║  Press Ctrl+C to stop the server                          ║
+echo ║   Flask Server Starting                                   ║
+echo ║   URL: http://127.0.0.1:5000                              ║
+echo ║   Press Ctrl+C to stop                                    ║
 echo ╚═══════════════════════════════════════════════════════════╝
 echo.
 
-REM Set Flask configuration
 set FLASK_APP=app.py
 set FLASK_ENV=development
 set FLASK_DEBUG=1
 
-REM Start the app
 python -m flask run
 
-REM If flask command fails, try direct python execution
-if errorlevel 1 (
-    echo [•] Trying alternative startup method...
-    python app.py
-)
-
+echo.
+echo [•] Flask stopped
 pause
+exit /b 0
+
+

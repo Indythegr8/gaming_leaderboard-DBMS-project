@@ -1,13 +1,15 @@
 -- ============================================================
--- Gaming Leaderboard System — Database Schema
+-- Gaming Leaderboard System — Database Schema (PostgreSQL)
 -- ============================================================
 
-CREATE DATABASE IF NOT EXISTS gaming_leaderboard;
-USE gaming_leaderboard;
-
 -- ─── Players ─────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS players (
-    player_id   INT AUTO_INCREMENT PRIMARY KEY,
+DROP TABLE IF EXISTS friends CASCADE;
+DROP TABLE IF EXISTS scores CASCADE;
+DROP TABLE IF EXISTS games CASCADE;
+DROP TABLE IF EXISTS players CASCADE;
+
+CREATE TABLE players (
+    player_id   SERIAL PRIMARY KEY,
     username    VARCHAR(50)  UNIQUE NOT NULL,
     avatar_url  VARCHAR(255) DEFAULT NULL,
     bio         VARCHAR(255) DEFAULT NULL,
@@ -15,8 +17,8 @@ CREATE TABLE IF NOT EXISTS players (
 );
 
 -- ─── Games ───────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS games (
-    game_id     INT AUTO_INCREMENT PRIMARY KEY,
+CREATE TABLE games (
+    game_id     SERIAL PRIMARY KEY,
     title       VARCHAR(100) UNIQUE NOT NULL,
     description TEXT
 );
@@ -24,8 +26,8 @@ CREATE TABLE IF NOT EXISTS games (
 -- ─── Scores (Audit Log) ─────────────────────────────────────
 -- Every game completion is recorded here.
 -- This is the single source of truth for all rankings.
-CREATE TABLE IF NOT EXISTS scores (
-    score_id    INT AUTO_INCREMENT PRIMARY KEY,
+CREATE TABLE scores (
+    score_id    SERIAL PRIMARY KEY,
     player_id   INT       NOT NULL,
     game_id     INT       NOT NULL,
     score       INT       NOT NULL CHECK (score >= 0),
@@ -36,7 +38,7 @@ CREATE TABLE IF NOT EXISTS scores (
 
 -- ─── Friends ─────────────────────────────────────────────────
 -- Bidirectional friendship: insert (A,B) AND (B,A).
-CREATE TABLE IF NOT EXISTS friends (
+CREATE TABLE friends (
     user_id     INT NOT NULL,
     friend_id   INT NOT NULL,
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -56,13 +58,13 @@ CREATE INDEX idx_timestamp       ON scores (timestamp);
 CREATE INDEX idx_friend_lookup   ON friends (user_id, friend_id);
 
 -- ─── Seed Data ───────────────────────────────────────────────
-INSERT IGNORE INTO players (username, bio) VALUES
+INSERT INTO players (username, bio) VALUES
     ('GamerX',       'FPS veteran. 10 years of grinding.'),
     ('NoobMaster99',  'Just started. Watch me climb.'),
     ('ProSlayer',     'Competitive esports player.'),
     ('SpeedRunner',   'World record chaser.');
 
-INSERT IGNORE INTO games (title, description) VALUES
+INSERT INTO games (title, description) VALUES
     ('Space Invaders', 'Classic arcade shooter'),
     ('Doom Eternal',   'Fast-paced FPS action'),
     ('Tetris',         'Puzzle matching game');
@@ -73,7 +75,7 @@ INSERT INTO scores (player_id, game_id, score) VALUES
     (2, 3, 5000),  (4, 3, 12000);
 
 -- Seed friendships (bidirectional)
-INSERT IGNORE INTO friends (user_id, friend_id) VALUES
+INSERT INTO friends (user_id, friend_id) VALUES
     (1, 2), (2, 1),
     (1, 3), (3, 1),
     (2, 4), (4, 2);

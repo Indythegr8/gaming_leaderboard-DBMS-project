@@ -7,7 +7,8 @@ import os
 from datetime import datetime
 
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
-import mysql.connector
+import psycopg2
+from psycopg2.extras import DictCursor
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -20,15 +21,15 @@ app.secret_key = os.getenv("SECRET_KEY", "super_secret_gaming_key_2026")
 # ────────────────────────────────────────────────────────────────
 
 def get_db():
-    """Return a MySQL connection or None."""
+    """Return a PostgreSQL connection or None."""
     try:
-        return mysql.connector.connect(
+        return psycopg2.connect(
             host=os.getenv("DB_HOST", "localhost"),
-            user=os.getenv("DB_USER", "root"),
+            user=os.getenv("DB_USER", "postgres"),
             password=os.getenv("DB_PASSWORD", ""),
             database=os.getenv("DB_NAME", "gaming_leaderboard"),
         )
-    except mysql.connector.Error as err:
+    except psycopg2.Error as err:
         print(f"[DB ERROR] {err}")
         return None
 
@@ -36,9 +37,9 @@ def get_db():
 def _period_filter(period: str) -> str:
     """Return a SQL WHERE clause fragment for the requested time period."""
     mapping = {
-        "daily": "AND s.timestamp >= DATE_SUB(NOW(), INTERVAL 1 DAY)",
-        "weekly": "AND s.timestamp >= DATE_SUB(NOW(), INTERVAL 7 DAY)",
-        "monthly": "AND s.timestamp >= DATE_SUB(NOW(), INTERVAL 30 DAY)",
+        "daily": "AND s.timestamp >= CURRENT_TIMESTAMP - INTERVAL '1 day'",
+        "weekly": "AND s.timestamp >= CURRENT_TIMESTAMP - INTERVAL '7 days'",
+        "monthly": "AND s.timestamp >= CURRENT_TIMESTAMP - INTERVAL '30 days'",
     }
     return mapping.get(period, "")  # 'all' or unknown → no filter
 
@@ -55,7 +56,7 @@ def index():
         flash("Could not connect to database. Please run schema.sql and check credentials.", "error")
         return render_template("index.html", scores=[])
 
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor(cursor_factory=DictCursor)
 
     # Global top scores — one row per player (their best single score)
     query = """
@@ -69,7 +70,7 @@ def index():
                 FROM scores
                 GROUP BY player_id
             ) mx ON s.player_id = mx.player_id AND s.score = mx.max_score
-            GROUP BY s.player_id
+            GROUP BY s.player_id, s.game_id, s.score, s.timestamp
         ) best ON p.player_id = best.player_id
         JOIN games g ON best.game_id = g.game_id
         ORDER BY best.score DESC, best.timestamp ASC
@@ -91,7 +92,7 @@ def add_score():
         flash("Could not connect to database.", "error")
         return redirect(url_for("index"))
 
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor(cursor_factory=DictCursor)
 
     if request.method == "POST":
         username = request.form.get("username", "").strip()
@@ -115,9 +116,8 @@ def add_score():
             cursor.execute("SELECT player_id FROM players WHERE username = %s", (username,))
             player = cursor.fetchone()
             if not player:
-                cursor.execute("INSERT INTO players (username) VALUES (%s)", (username,))
-                conn.commit()
-                player_id = cursor.lastrowid
+                cursor.execute("INSERT INTO players (username) VALUES (%s) RETURNING player_id", (username,))
+                player_id = cursor.fetchone()["player_id"]
             else:
                 player_id = player["player_id"]
 
@@ -130,7 +130,7 @@ def add_score():
             flash("Score added successfully!", "success")
             return redirect(url_for("index"))
 
-        except mysql.connector.Error as err:
+        except psycopg2.Error as err:
             flash(f"Database error: {err}", "error")
             conn.rollback()
 
@@ -150,7 +150,7 @@ def profile(username):
         flash("Could not connect to database.", "error")
         return redirect(url_for("index"))
 
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor(cursor_factory=DictCursor)
 
     # Player info
     cursor.execute("SELECT * FROM players WHERE username = %s", (username,))
@@ -252,7 +252,7 @@ def api_rankings():
     limit = min(int(request.args.get("limit", 100)), 500)
     time_filter = _period_filter(period)
 
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor(cursor_factory=DictCursor)
     query = f"""
         SELECT
             p.player_id,
@@ -298,7 +298,7 @@ def api_rankings_nearby(username):
     period = request.args.get("period", "all")
     time_filter = _period_filter(period)
 
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor(cursor_factory=DictCursor)
     query = f"""
         WITH RankedPlayers AS (
             SELECT
@@ -362,7 +362,7 @@ def api_rankings_friends(username):
     period = request.args.get("period", "all")
     time_filter = _period_filter(period)
 
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor(cursor_factory=DictCursor)
 
     # Get the player's ID
     cursor.execute("SELECT player_id FROM players WHERE username = %s", (username,))
@@ -415,7 +415,7 @@ def api_player_stats(username):
     if not conn:
         return jsonify({"error": "Database connection failed"}), 500
 
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor(cursor_factory=DictCursor)
 
     cursor.execute("""
         WITH PlayerTotals AS (
